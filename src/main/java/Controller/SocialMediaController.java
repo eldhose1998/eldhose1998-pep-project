@@ -1,13 +1,14 @@
 package Controller;
 
-import java.util.Optional;
-
-import DAO.AccountDAO;
-import DAO.MessageDAO;
 import Model.Account;
 import Model.Message;
+import Service.AccountService;
+import Service.MessageService;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
+
+import java.util.List;
+import java.util.Optional;
 
 /**
  * TODO: You will need to write your own endpoints and handlers for your controller. The endpoints you will need can be
@@ -15,96 +16,143 @@ import io.javalin.http.Context;
  * refer to prior mini-project labs and lecture materials for guidance on how a controller may be built.
  */
 public class SocialMediaController {
-    private MessageDAO messageDAO;
-    private AccountDAO accountDAO;
 
-    public SocialMediaController(){
-        this.messageDAO=new MessageDAO();
-        this.accountDAO=new AccountDAO();
+    private final AccountService accountService;
+    private final MessageService messageService;
+
+    public SocialMediaController() {
+        this.accountService = new AccountService();
+        this.messageService = new MessageService();
     }
+
     /**
      * In order for the test cases to work, you will need to write the endpoints in the startAPI() method, as the test
      * suite must receive a Javalin object from this method.
+     *
      * @return a Javalin app object which defines the behavior of the Javalin controller.
      */
     public Javalin startAPI() {
         Javalin app = Javalin.create();
-       //app.get("example-endpoint", this::exampleHandler);
 
         app.post("/register", this::registerAccountHandler);
         app.post("/login", this::loginAccountHandler);
         app.post("/messages", this::messageCreateHandler);
         app.get("/messages", this::getMessageHandler);
-        app.get("/messages", this::getMessageByIDHandler);
-        app.delete("/message/{message_id}", this::messageDeleteByIDHandler);
+        app.get("/messages/{message_id}", this::getMessageByIDHandler);
+        app.delete("/messages/{message_id}", this::messageDeleteByIDHandler);
         app.patch("/messages/{message_id}", this::updateMsgByIDHandler);
         app.get("/accounts/{account_id}/messages", this::getMessageByUserHandler);
 
-        app.start(8080);
         return app;
     }
 
     /**
-     * This is an example handler for an example endpoint.
-     * @param context The Javalin Context object manages information about both the HTTP request and response.
+     * Handles the registration of a new account.
+     * @param context The Javalin Context object containing the HTTP request and response.
      */
     private void registerAccountHandler(Context context) {
-        Account account=context.bodyAsClass(Account.class);
-        
-        if (account.getUsername() == null || account.getUsername().isBlank() || 
-        account.getPassword() == null || account.getPassword().length() < 4 || 
-        accountDAO.usernameExists(account.getUsername())) {
-        context.status(400);  // Bad request
-        return;
-        }
+        Account account = context.bodyAsClass(Account.class);
+        Optional<Account> registeredAccount = accountService.registerAccount(account.getUsername(), account.getPassword());
 
-        Account registeredAccount = accountDAO.createAccount(account);
-        context.status(200).json(registeredAccount);
-    }
-
-
-    private void loginAccountHandler(Context context){
-        Account account=context.bodyAsClass(Account.class);
-
-        Account existingAccount=accountDAO.validateLogin(account.getUsername(),account.getPassword());
-        if(existingAccount!=null){
-            context.status(200).json(existingAccount);
-        }else{
-            context.status(401);
+        if (registeredAccount.isPresent()) {
+            context.status(200).json(registeredAccount.get()); // 200 OK
+        } else {
+            context.status(400); // 400 Bad Request
         }
     }
 
+    /**
+     * Handles the login of an account.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
+    private void loginAccountHandler(Context context) {
+        Account account = context.bodyAsClass(Account.class);
+        Optional<Account> loggedInAccount = accountService.login(account.getUsername(), account.getPassword());
+
+        if (loggedInAccount.isPresent()) {
+            context.status(200).json(loggedInAccount.get()); // 200 OK
+        } else {
+            context.status(401); // 401 Unauthorized
+        }
+    }
+
+    /**
+     * Handles the creation of a new message.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
     private void messageCreateHandler(Context context) {
-        // Parse the incoming JSON to a Message object
         Message message = context.bodyAsClass(Message.class);
-        
-        // Validate the message content
-        if (message.getMessage_text() == null || message.getMessage_text().isBlank() || 
-            message.getMessage_text().length() > 255 || 
-            !accountDAO.userExists(message.getPosted_by())) {
-            context.status(400);  // Bad request
-            return;
+        Optional<Message> createdMessage = messageService.createMessage(message.getPosted_by(), message.getMessage_text(), message.getTime_posted_epoch());
+
+        if (createdMessage.isPresent()) {
+            context.status(200).json(createdMessage.get());
+        } else {
+            context.status(400);
         }
-    
-        // Create the message in the database
-        Message createdMessage = messageDAO.createMessage(message);
-        
-        // Return the created message, including message_id
-        context.json(createdMessage);
     }
 
-    private void getMessageHandler(Context context){
+    /**
+     * Retrieves all messages.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
+    private void getMessageHandler(Context context) {
+        List<Message> messages = messageService.getAllMessages();
+        context.status(200).json(messages);
     }
 
-    private void getMessageByIDHandler(Context context){
+    /**
+     * Retrieves a message by its ID.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
+    private void getMessageByIDHandler(Context context) {
+        int messageId = Integer.parseInt(context.pathParam("message_id"));
+        Optional<Message> message = messageService.getMessageById(messageId);
+
+        if (message.isPresent()) {
+            context.status(200).json(message.get());
+        } else {
+            context.status(200).result("");
+        }
     }
 
-    private void messageDeleteByIDHandler(Context context){
+    /**
+     * Deletes a message by its ID.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
+    private void messageDeleteByIDHandler(Context context) {
+        int messageId = Integer.parseInt(context.pathParam("message_id"));
+        Optional<Message> message = messageService.getMessageById(messageId);
+
+        if (message.isPresent() && messageService.deleteMessageById(messageId)) {
+            context.status(200).json(message.get());
+        } else {
+            context.status(200).result("");
+        }
     }
 
-    private void updateMsgByIDHandler(Context context){
+    /**
+     * Updates the text of a message identified by its ID.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
+    private void updateMsgByIDHandler(Context context) {
+        int messageId = Integer.parseInt(context.pathParam("message_id"));
+        String newText = context.bodyAsClass(Message.class).getMessage_text();
+        Optional<Message> updatedMessage = messageService.updateMessageText(messageId, newText);
+
+        if (updatedMessage.isPresent()) {
+            context.status(200).json(updatedMessage.get());
+        } else {
+            context.status(400);
+        }
     }
 
-    private void getMessageByUserHandler(Context context){
+    /**
+     * Retrieves all messages posted by a specific user.
+     * @param context The Javalin Context object containing the HTTP request and response.
+     */
+    private void getMessageByUserHandler(Context context) {
+        int userId = Integer.parseInt(context.pathParam("account_id"));
+        List<Message> messages = messageService.getMessagesByUserId(userId);
+        context.status(200).json(messages);
     }
 }
